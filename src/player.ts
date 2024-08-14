@@ -46,8 +46,8 @@ export class Player {
 
     async connect() {
         this._socket = io(`${this.wsEntryPoint}/stars`, {
-            auth: {
-                token: this._token,
+            extraHeaders: {
+                Authorization: `Bearer ${this._token}`,
             },
         });
         this._socket.on('connect', () => {
