@@ -1,5 +1,7 @@
 import { Socket, io } from "socket.io-client";
 import { Singleton } from "./decorator/singleton";
+import { OMFAction } from "./action";
+import { IPlayer } from "./playser.instance";
 
 @Singleton()
 export class Player {
@@ -18,7 +20,7 @@ export class Player {
     }
 
     async signIn(username: string, password: string) {
-        const req = await fetch(`${this.entryPoint}/user`, {
+        const req = await fetch(`${this.entryPoint}/user/token`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -35,27 +37,69 @@ export class Player {
         localStorage.setItem('username', this._username);
         localStorage.setItem('token', this._token);
     }
-    private _socket: Socket | null = null;
 
+    async signOut() {
+        this._username = '';
+        this._token = '';
+        localStorage.removeItem('username');
+        localStorage.removeItem('token');
+    }
+
+    async refreshToken() {
+        const req = await fetch(`${this.entryPoint}/user/token`, {
+            method: 'GET',
+            headers: {
+                Authorization: `Bearer ${this.token}`,
+            },
+        });
+        if (!req.ok) {
+            this._token = '';
+            localStorage.removeItem('token');
+            throw new Error(req.statusText)
+        }
+        const json = await req.json();
+        this._token = json.token;
+    }
+
+    private _socket: Socket | null = null;
     get socket() {
         if (!this._socket) {
             throw new Error('Socket not connected');
         }
         return this._socket!;
     }
-
-    async connect() {
-        this._socket = io(`${this.wsEntryPoint}/stars`, {
-            auth: {
-                token: this._token,
+    readonly onDisconnect = new OMFAction<void>();
+    async startLink() {
+        this._socket = io(`${this.wsEntryPoint}/player`, {
+            extraHeaders: {
+                Authorization: `Bearer ${this.token}`,
             },
-        });
-        this._socket.on('connect', () => {
-            console.log('connected');
         });
         this._socket.on('disconnect', () => {
             console.log('disconnected');
+            this.onDisconnect.emit();
         });
-        
+        const connectedPromise = new Promise<void>((resolve, reject) => {
+            this._socket!.on('connect', () => {
+                console.log('connected');
+                resolve();
+            });
+            this._socket!.on('error', (err: Error) => {
+                reject(err);
+            });
+        });
+        const requestPromise = fetch(`${this.entryPoint}/player`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.token}`,
+            },
+        }).then(resp => resp.json()) as Promise<IPlayer>;
+
+        const [player] = await Promise.all([requestPromise, connectedPromise]);
+        return player;
+    }
+
+    constructor() {
     }
 }
