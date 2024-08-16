@@ -1,7 +1,7 @@
 import { Socket, io } from "socket.io-client";
 import { Singleton } from "./decorator/singleton";
 import { OMFAction } from "./action";
-import { IPlayer } from "./playser.instance";
+import { IPlayer } from "./player.instance";
 
 @Singleton()
 export class Player {
@@ -20,7 +20,7 @@ export class Player {
     }
 
     async signIn(username: string, password: string) {
-        const req = await fetch(`${this.entryPoint}/user/token`, {
+        const req = await fetch(`${this.entryPoint}/player`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -46,7 +46,7 @@ export class Player {
     }
 
     async refreshToken() {
-        const req = await fetch(`${this.entryPoint}/user/token`, {
+        const req = await fetch(`${this.entryPoint}/player/token`, {
             method: 'GET',
             headers: {
                 Authorization: `Bearer ${this.token}`,
@@ -69,17 +69,41 @@ export class Player {
         return this._socket!;
     }
     readonly onDisconnect = new OMFAction<void>();
+    private _player: IPlayer | null = null;
+    get player() {
+        if (!this._player) {
+            throw new Error('Player not connected');
+        }
+        return this._player;
+    }
+    
+    get online() {
+        return !!this._socket;
+    }
+
     async startLink() {
-        this._socket = io(`${this.wsEntryPoint}/player`, {
-            extraHeaders: {
-                Authorization: `Bearer ${this.token}`,
+        const respUser = fetch(`${this.entryPoint}/player`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${this.token}`,
             },
-        });
-        this._socket.on('disconnect', () => {
-            console.log('disconnected');
-            this.onDisconnect.emit();
-        });
-        const connectedPromise = new Promise<void>((resolve, reject) => {
+        })
+        const jsonUser: IPlayer = await respUser.then(resp => resp.json());
+        this._player = jsonUser;
+        await new Promise<void>((resolve, reject) => {
+            this._socket = io(`${this.wsEntryPoint}/player`, {
+                extraHeaders: {
+                    Authorization: `Bearer ${this.token}`,
+                },
+            });
+            this._socket.on('disconnect', () => {
+                console.log('disconnected');
+                this._player = null;
+                this._socket = null;
+                this.onDisconnect.emit();
+            });
+
             this._socket!.on('connect', () => {
                 console.log('connected');
                 resolve();
@@ -88,16 +112,13 @@ export class Player {
                 reject(err);
             });
         });
-        const requestPromise = fetch(`${this.entryPoint}/player`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.token}`,
-            },
-        }).then(resp => resp.json()) as Promise<IPlayer>;
+        return this._player;
+    }
 
-        const [player] = await Promise.all([requestPromise, connectedPromise]);
-        return player;
+    async disconnect() {
+        if (this._socket) {
+            this._socket.disconnect();
+        }
     }
 
     constructor() {
