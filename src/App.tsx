@@ -29,6 +29,10 @@ function App() {
         <p>LocatedAt: {playerInfo.locatedAt}</p>
         <p>SpacePosition: {playerInfo.auX}AU, {playerInfo.auY}AU, {playerInfo.auZ}AU</p>
         <p>Position: {playerInfo.x}m, {playerInfo.y}m, {playerInfo.z}m</p>
+        <Button onClick={async ()=>{
+          const delay = await player.ping()
+          message.info(`Ping: ${delay}ms`)
+        }}>ping</Button>
       </>}
       <Button
         loading={loading}

@@ -2,6 +2,8 @@ import { Socket, io } from "socket.io-client";
 import { Singleton } from "./decorator/singleton";
 import { OMFAction } from "./action";
 import { IPlayer } from "./player.instance";
+import { OMFMessage, OMFMessageType } from "./message/message.interface";
+import { pingMessage } from "./message/ping.message";
 
 @Singleton()
 export class Player {
@@ -103,16 +105,49 @@ export class Player {
                 this._socket = null;
                 this.onDisconnect.emit();
             });
-
             this._socket!.on('connect', () => {
                 console.log('connected');
                 resolve();
             });
+            this._socket!.on('message', this.handleMessage);
             this._socket!.on('error', (err: Error) => {
                 reject(err);
             });
         });
         return this._player;
+    }
+
+    readonly onReceiveMessage = new OMFAction<OMFMessage>();
+
+    ping() {
+        return new Promise<number>((resolve) => {
+            const pingMsg = pingMessage();
+            this.send(pingMsg)
+            const pong = (message: OMFMessage) => {
+                if (message.type === OMFMessageType.PONG && message.payload.id === pingMsg.payload.id) {
+                    this.onReceiveMessage.off(pong);
+                    resolve(Date.now() - pingMsg.payload.timestamp);
+                }
+            }
+            this.onReceiveMessage.on(pong);
+        });
+    }
+
+
+
+    private handleMessage = (message: OMFMessage) => {
+        switch (message.type) {
+            default:
+                this.onReceiveMessage.emit(message);
+                break;
+        }
+    }
+
+    async send(message: OMFMessage) {
+        if (!this._socket) {
+            throw new Error('Socket not connected');
+        }
+        this._socket.emit('message', message);
     }
 
     async disconnect() {
