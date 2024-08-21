@@ -4,6 +4,7 @@ import { OMFAction } from "./action";
 import { IPlayer } from "./player.instance";
 import { OMFMessage, OMFMessageType } from "./message/message.interface";
 import { pingMessage } from "./message/ping.message";
+import { omfProtoParser } from "./parser.proto";
 
 @Singleton()
 export class Player {
@@ -78,7 +79,7 @@ export class Player {
         }
         return this._player;
     }
-    
+
     get online() {
         return !!this._socket;
     }
@@ -98,6 +99,7 @@ export class Player {
                 extraHeaders: {
                     Authorization: `Bearer ${this.token}`,
                 },
+                parser: omfProtoParser,
             });
             this._socket.on('disconnect', () => {
                 console.log('disconnected');
@@ -133,8 +135,6 @@ export class Player {
         });
     }
 
-
-
     private handleMessage = (message: OMFMessage) => {
         switch (message.type) {
             default:
@@ -148,6 +148,10 @@ export class Player {
             throw new Error('Socket not connected');
         }
         this._socket.emit('message', message);
+    }
+
+    async sendSocket(...args: unknown[]) {
+        this.socket.emit('test', ...args);
     }
 
     async disconnect() {
