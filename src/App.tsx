@@ -28,8 +28,8 @@ function App() {
         <p>SpacePosition: {playerInfo.auX}AU, {playerInfo.auY}AU, {playerInfo.auZ}AU</p>
         <p>Position: {playerInfo.x}m, {playerInfo.y}m, {playerInfo.z}m</p>
         <Button onClick={async () => {
-          const delay = await player.sendSocket('ping')
-          message.info(`Ping: ${delay}ms`)
+          const time = await player.ping();
+          message.info(`Ping: ${time}ms`)
         }}>ping</Button>
         <Button onClick={async () => {
           player.sendSocket("test")

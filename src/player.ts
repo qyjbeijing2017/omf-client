@@ -1,7 +1,8 @@
 import { Singleton } from "./decorator/singleton";
 import { OMFAction } from "./action";
 import { IPlayer } from "./player.instance";
-import { OMFMessage } from "./message/message.interface";
+import { Builder, ByteBuffer } from 'flatbuffers';
+import { OMFMessage, OMFMessagePayload, Ping } from "./omf/message";
 
 
 @Singleton()
@@ -76,13 +77,15 @@ export class Player {
         return !!this._socket;
     }
 
+    readonly onMessage = new OMFAction<OMFMessage>();
+
     async startLink() {
         await new Promise<void>((resolve, reject) => {
             this._socket = new WebSocket(this.wsEntryPoint + `/Players/socket?token=${this.token}`);
             const onOpen = () => {
                 this._socket?.removeEventListener('open', onOpen);
                 this._socket?.removeEventListener('error', onError);
-                this._player = { 
+                this._player = {
                     playerId: '1',
                     username: 'test',
                     createdAt: '2021-09-01',
@@ -95,7 +98,11 @@ export class Player {
                     locatedAt: 'Earth',
                 };
                 this._socket?.addEventListener('message', (event) => {
-                    console.log('Received message', event.data);
+                    (event.data as Blob).arrayBuffer().then((buffer) => {
+                        const byte = new ByteBuffer(new Uint8Array(buffer));
+                        const message = OMFMessage.getRootAsOMFMessage(byte);
+                        this.onMessage.invoke(message);
+                    });
                 });
                 resolve();
             }
@@ -112,38 +119,34 @@ export class Player {
         return this._player;
     }
 
-    readonly onReceiveMessage = new OMFAction<OMFMessage>();
-
-    // ping() {
-    //     return new Promise<number>((resolve) => {
-    //         const pingMsg = pingMessage();
-    //         this.send(pingMsg)
-    //         const pong = (message: OMFMessage) => {
-    //             if (message.type === OMFMessageType.PONG && message.payload.id === pingMsg.payload.id) {
-    //                 this.onReceiveMessage.off(pong);
-    //                 resolve(Date.now() - pingMsg.payload.timestamp);
-    //             }
-    //         }
-    //         this.onReceiveMessage.on(pong);
-    //     });
-    // }
-
-    // private handleMessage = (message: OMFMessage) => {
-    //     switch (message.type) {
-    //         default:
-    //             this.onReceiveMessage.emit(message);
-    //             break;
-    //     }
-    // }
-
-    // async send(message: OMFMessage) {
-    //     if (!this._socket) {
-    //         throw new Error('Socket not connected');
-    //     }
-    // }
+    ping() {
+        let builder = new Builder();
+        Ping.startPing(builder);
+        let ping = Ping.endPing(builder);
+        OMFMessage.startOMFMessage(builder);
+        OMFMessage.addPayloadType(builder, OMFMessagePayload.Ping);
+        OMFMessage.addPayload(builder, ping);
+        const timestamp = Date.now();
+        OMFMessage.addTimestamp(builder, BigInt(timestamp));
+        let message = OMFMessage.endOMFMessage(builder);
+        builder.finish(message);
+        let buffer = builder.asUint8Array();
+        this._socket?.send(buffer);
+        return new Promise<number>((resolve) => {
+            const handleMessage = (message: OMFMessage) => {
+                if (message.payloadType() === OMFMessagePayload.Pong) {
+                    this.onMessage.off(handleMessage);
+                    const backTimestemp = Number(message.timestamp());
+                    console.log('toServer', backTimestemp - timestamp);
+                    resolve(Date.now() - timestamp);
+                }
+            }
+            this.onMessage.on(handleMessage);
+        });
+    }
 
     async sendSocket(message: string) {
-        if(!this._socket) {
+        if (!this._socket) {
             console.error('Socket not connected');
         }
         this._socket?.send(message);
