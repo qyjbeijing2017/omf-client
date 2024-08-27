@@ -1,10 +1,8 @@
-import { Socket, io } from "socket.io-client";
 import { Singleton } from "./decorator/singleton";
 import { OMFAction } from "./action";
 import { IPlayer } from "./player.instance";
-import { OMFMessage, OMFMessageType } from "./message/message.interface";
-import { pingMessage } from "./message/ping.message";
-import { omfProtoParser } from "./parser.proto";
+import { OMFMessage } from "./message/message.interface";
+
 
 @Singleton()
 export class Player {
@@ -23,7 +21,7 @@ export class Player {
     }
 
     async signIn(username: string, password: string) {
-        const req = await fetch(`${this.entryPoint}/player`, {
+        const req = await fetch(`${this.entryPoint}/Players/login`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -49,7 +47,7 @@ export class Player {
     }
 
     async refreshToken() {
-        const req = await fetch(`${this.entryPoint}/player/token`, {
+        const req = await fetch(`${this.entryPoint}/players/token`, {
             method: 'GET',
             headers: {
                 Authorization: `Bearer ${this.token}`,
@@ -64,13 +62,7 @@ export class Player {
         this._token = json.token;
     }
 
-    private _socket: Socket | null = null;
-    get socket() {
-        if (!this._socket) {
-            throw new Error('Socket not connected');
-        }
-        return this._socket!;
-    }
+    private _socket: WebSocket | null = null;
     readonly onDisconnect = new OMFAction<void>();
     private _player: IPlayer | null = null;
     get player() {
@@ -85,78 +77,81 @@ export class Player {
     }
 
     async startLink() {
-        const respUser = fetch(`${this.entryPoint}/player`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.token}`,
-            },
-        })
-        const jsonUser: IPlayer = await respUser.then(resp => resp.json());
-        this._player = jsonUser;
         await new Promise<void>((resolve, reject) => {
-            this._socket = io(`${this.wsEntryPoint}/player`, {
-                extraHeaders: {
-                    Authorization: `Bearer ${this.token}`,
-                },
-                parser: omfProtoParser,
-            });
-            this._socket.on('disconnect', () => {
-                console.log('disconnected');
-                this._player = null;
-                this._socket = null;
-                this.onDisconnect.emit();
-            });
-            this._socket!.on('connect', () => {
-                console.log('connected');
+            this._socket = new WebSocket(this.wsEntryPoint + `/Players/socket?token=${this.token}`);
+            const onOpen = () => {
+                this._socket?.removeEventListener('open', onOpen);
+                this._socket?.removeEventListener('error', onError);
+                this._player = { 
+                    playerId: '1',
+                    username: 'test',
+                    createdAt: '2021-09-01',
+                    auX: 0,
+                    auY: 0,
+                    auZ: 0,
+                    x: 0,
+                    y: 0,
+                    z: 0,
+                    locatedAt: 'Earth',
+                };
+                this._socket?.addEventListener('message', (event) => {
+                    console.log('Received message', event.data);
+                });
                 resolve();
-            });
-            this._socket!.on('message', this.handleMessage);
-            this._socket!.on('error', (err: Error) => {
-                reject(err);
-            });
+            }
+            const onError = (event: Event) => {
+                this._socket?.removeEventListener('open', onOpen);
+                this._socket?.removeEventListener('error', onError);
+                this._socket = null;
+                console.error('Socket error', event);
+                reject(event);
+            }
+            this._socket.addEventListener('open', onOpen);
+            this._socket.addEventListener('error', onError);
         });
         return this._player;
     }
 
     readonly onReceiveMessage = new OMFAction<OMFMessage>();
 
-    ping() {
-        return new Promise<number>((resolve) => {
-            const pingMsg = pingMessage();
-            this.send(pingMsg)
-            const pong = (message: OMFMessage) => {
-                if (message.type === OMFMessageType.PONG && message.payload.id === pingMsg.payload.id) {
-                    this.onReceiveMessage.off(pong);
-                    resolve(Date.now() - pingMsg.payload.timestamp);
-                }
-            }
-            this.onReceiveMessage.on(pong);
-        });
-    }
+    // ping() {
+    //     return new Promise<number>((resolve) => {
+    //         const pingMsg = pingMessage();
+    //         this.send(pingMsg)
+    //         const pong = (message: OMFMessage) => {
+    //             if (message.type === OMFMessageType.PONG && message.payload.id === pingMsg.payload.id) {
+    //                 this.onReceiveMessage.off(pong);
+    //                 resolve(Date.now() - pingMsg.payload.timestamp);
+    //             }
+    //         }
+    //         this.onReceiveMessage.on(pong);
+    //     });
+    // }
 
-    private handleMessage = (message: OMFMessage) => {
-        switch (message.type) {
-            default:
-                this.onReceiveMessage.emit(message);
-                break;
+    // private handleMessage = (message: OMFMessage) => {
+    //     switch (message.type) {
+    //         default:
+    //             this.onReceiveMessage.emit(message);
+    //             break;
+    //     }
+    // }
+
+    // async send(message: OMFMessage) {
+    //     if (!this._socket) {
+    //         throw new Error('Socket not connected');
+    //     }
+    // }
+
+    async sendSocket(message: string) {
+        if(!this._socket) {
+            console.error('Socket not connected');
         }
-    }
-
-    async send(message: OMFMessage) {
-        if (!this._socket) {
-            throw new Error('Socket not connected');
-        }
-        this._socket.emit('message', message);
-    }
-
-    async sendSocket(...args: unknown[]) {
-        this.socket.emit('test', ...args);
+        this._socket?.send(message);
     }
 
     async disconnect() {
         if (this._socket) {
-            this._socket.disconnect();
+            this._socket.close();
         }
     }
 
